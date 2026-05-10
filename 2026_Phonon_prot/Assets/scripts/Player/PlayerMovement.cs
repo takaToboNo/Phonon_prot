@@ -19,13 +19,23 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] private float coyoteTime = 0.15f;
 
     [Header("バースト・エイム設定")]
-    [SerializeField] private float burstForce = 25f;
     [SerializeField] private float aimTimeScale = 0.05f;
     [SerializeField] private LineRenderer aimIndicator;
     [SerializeField] private float bounceSpeedMultiplier = 1.0f;
 
+    [Header("チャージ設定")]
+    [SerializeField] private float[] chargeForceLevels = { 15f, 25f, 40f };
+    [SerializeField] private float chargeTimePerLevel = 0.5f;
+    private float currentChargeTimer = 0f;
+    private int currentChargeLevel = 0;
+
     [Header("速度制限・演出設定")]
-    [SerializeField] private float bulletModeExitThreshold = 3f; // 弾丸モードが解除される速度
+    [SerializeField] private float bulletModeExitThreshold = 3f;
+
+    [Header("発射回数制限")]
+    [SerializeField] private int maxBurstCount = 3;
+    [SerializeField] private BurstCounterUI burstUI;
+    private int currentBurstCount = 0;
 
     private Rigidbody2D rb;
     private BoxCollider2D col;
@@ -46,12 +56,10 @@ public class PlayerMovement : MonoBehaviour
         rb = GetComponent<Rigidbody2D>();
         col = GetComponent<BoxCollider2D>();
         colliderHalfHeight = col.size.y / 2f;
-
         rb.freezeRotation = true;
         rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
         if (aimIndicator) aimIndicator.enabled = false;
 
-        // 残像マネージャーに自分自身を登録
         if (AfterImageManager.Instance != null)
         {
             AfterImageManager.Instance.SetPlayer(transform, GetComponent<SpriteRenderer>());
@@ -66,10 +74,9 @@ public class PlayerMovement : MonoBehaviour
         HandleBurstInput();
 
         float currentSpeed = rb.linearVelocity.magnitude;
-
-        if (currentSpeed <= bulletModeExitThreshold)
+        if (currentSpeed <= bulletModeExitThreshold && isBursting)
         {
-            AfterImageManager.Instance.StopEmitting();
+            ExitBurstMode();
         }
     }
 
@@ -90,10 +97,98 @@ public class PlayerMovement : MonoBehaviour
         }
     }
 
+    private void HandleBurstInput()
+    {
+        bool aimHeld = (Gamepad.current != null && Gamepad.current.leftTrigger.isPressed) ||
+                       (Mouse.current != null && Mouse.current.leftButton.isPressed);
+
+        // エイムを開始できるのは、発射回数が上限に達していない時だけ
+        if (aimHeld && (isGrounded || currentBurstCount < maxBurstCount))
+        {
+            if (!isAiming) StartAiming();
+            UpdateCharge();
+        }
+        else if (isAiming)
+        {
+            ExecuteBurst();
+        }
+    }
+
+    private void StartAiming()
+    {
+        isAiming = true;
+        isBursting = false;
+        currentChargeTimer = 0f;
+        currentChargeLevel = 0;
+
+        Time.timeScale = aimTimeScale;
+        Time.fixedDeltaTime = 0.02f * Time.timeScale;
+    }
+
+    private void UpdateCharge()
+    {
+        currentChargeTimer += Time.unscaledDeltaTime;
+        int lastLevel = currentChargeLevel;
+        currentChargeLevel = Mathf.FloorToInt(currentChargeTimer / chargeTimePerLevel);
+        currentChargeLevel = Mathf.Min(currentChargeLevel, chargeForceLevels.Length - 1);
+
+        UpdateAimDirection();
+
+        if (aimIndicator)
+        {
+            aimIndicator.enabled = true;
+            aimIndicator.SetPosition(0, transform.position);
+            float indicatorLength = 2f + currentChargeLevel * 1.5f;
+            aimIndicator.SetPosition(1, (Vector2)transform.position + aimDirection * indicatorLength);
+
+            Color lineColor = currentChargeLevel == 2 ? Color.red : (currentChargeLevel == 1 ? Color.yellow : Color.white);
+            aimIndicator.startColor = lineColor;
+            aimIndicator.endColor = lineColor;
+        }
+    }
+
+    private void UpdateAimDirection()
+    {
+        if (Gamepad.current != null && Gamepad.current.leftStick.ReadValue().magnitude > 0.1f)
+            aimDirection = Gamepad.current.leftStick.ReadValue().normalized;
+        else if (Mouse.current != null)
+        {
+            Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position);
+            Vector3 mousePos = Mouse.current.position.ReadValue();
+            aimDirection = (mousePos - screenPos).normalized;
+        }
+    }
+
+    private void ExecuteBurst()
+    {
+        isAiming = false;
+        isBursting = true;
+
+        // 発射回数をカウントアップ
+        currentBurstCount++;
+        Debug.Log($"Burst! Count: {currentBurstCount}/{maxBurstCount}");
+
+        burstUI.UpdateDisplay(currentBurstCount, maxBurstCount);
+
+        Time.timeScale = 1.0f;
+        Time.fixedDeltaTime = 0.02f;
+        if (aimIndicator) aimIndicator.enabled = false;
+
+        if (AfterImageManager.Instance != null)
+        {
+            AfterImageManager.Instance.StartEmitting();
+        }
+
+        float finalForce = chargeForceLevels[currentChargeLevel];
+        rb.linearVelocity = aimDirection * finalForce;
+    }
+
     private void CheckGround()
     {
+        // 接地判定の開始地点を計算
         Vector2 origin = (Vector2)transform.position + new Vector2(0, -colliderHalfHeight + groundCheckOffset);
         RaycastHit2D hit = Physics2D.BoxCast(origin, groundCheckSize, 0f, Vector2.down, 0.1f, groundLayer);
+
         if (hit.collider != null)
         {
             float angle = Vector2.Angle(hit.normal, Vector2.up);
@@ -102,10 +197,15 @@ public class PlayerMovement : MonoBehaviour
                 isGrounded = true;
                 coyoteTimeCounter = coyoteTime;
                 movingPlatformRb = hit.collider.GetComponent<Rigidbody2D>();
-                if (rb.linearVelocity.y <= 0.01f)
+
+                // 「弾丸状態（isBursting）ではない」かつ「落下または静止している（y速度がほぼ0以下）」とき
+                // 地面に触れていれば、発射回数とジャンプ回数をリセットする
+                if (!isBursting && rb.linearVelocity.y <= 0.01f)
                 {
                     jumpCount = 0;
-                    //isBursting = false;
+                    currentBurstCount = 0;
+
+                    burstUI.UpdateDisplay(currentBurstCount, maxBurstCount);
                 }
             }
         }
@@ -121,20 +221,16 @@ public class PlayerMovement : MonoBehaviour
     {
         if (isBursting)
         {
-            // ★修正：rb.linearVelocity ではなく、衝突直前の lastVelocity を使う
-            // これにより、壁に当たって死んだ速度ではなく、当たる前の勢いで計算できる
-            Vector2 incomingVector = lastVelocity;
+            // ヒットストップ
+            if (HitStopManager.Instance != null) HitStopManager.Instance.Stop(0.05f);
 
-            // 入射ベクトルの勢いが弱すぎる（ほぼ止まっている）場合は計算しない
+            Vector2 incomingVector = lastVelocity;
             if (incomingVector.magnitude < 1f) return;
 
             Vector2 normal = collision.contacts[0].normal;
             Vector2 reflectDir = Vector2.Reflect(incomingVector.normalized, normal);
 
-            // 元の速度の大きさを維持して反射
-            float speed = incomingVector.magnitude;
-            rb.linearVelocity = reflectDir * Mathf.Max(speed, burstForce * 0.5f) * bounceSpeedMultiplier;
-
+            rb.linearVelocity = reflectDir * incomingVector.magnitude * bounceSpeedMultiplier;
             aimDirection = reflectDir.normalized;
         }
     }
@@ -147,75 +243,36 @@ public class PlayerMovement : MonoBehaviour
 
         if (jumpPressed)
         {
-            if (coyoteTimeCounter > 0f || jumpCount < maxJumpCount)
+            // 弾丸状態なら強制キャンセルジャンプ
+            if (isBursting)
             {
-                jumpCount++;
-                coyoteTimeCounter = 0f;
-
-                // 残像エフェクト停止
-                if (AfterImageManager.Instance != null)
-                {
-                    AfterImageManager.Instance.StopEmitting();
-                }
-
-                isBursting = false;
-                rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
+                JumpAction();
+            }
+            // 通常時のジャンプ
+            else if (coyoteTimeCounter > 0f || jumpCount < maxJumpCount)
+            {
+                JumpAction();
             }
         }
     }
 
-    private void HandleBurstInput()
+    private void JumpAction()
     {
-        bool aimHeld = (Gamepad.current != null && Gamepad.current.leftTrigger.isPressed) ||
-                       (Mouse.current != null && Mouse.current.leftButton.isPressed);
-        if (aimHeld) StartAiming();
-        else if (isAiming) ExecuteBurst();
+        jumpCount++;
+        coyoteTimeCounter = 0f;
+        ExitBurstMode();
+        rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
     }
 
-    private void StartAiming()
+    private void ExitBurstMode()
     {
-        isAiming = true;
         isBursting = false;
-        Time.timeScale = aimTimeScale;
-        Time.fixedDeltaTime = 0.02f * Time.timeScale;
-        if (Gamepad.current != null && Gamepad.current.leftStick.ReadValue().magnitude > 0.1f)
-            aimDirection = Gamepad.current.leftStick.ReadValue().normalized;
-        else if (Mouse.current != null)
-        {
-            Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position);
-            Vector3 mousePos = Mouse.current.position.ReadValue();
-            aimDirection = (mousePos - screenPos).normalized;
-        }
-        if (aimIndicator)
-        {
-            aimIndicator.enabled = true;
-            aimIndicator.SetPosition(0, transform.position);
-            aimIndicator.SetPosition(1, (Vector2)transform.position + aimDirection * 3f);
-        }
-    }
-
-    private void ExecuteBurst()
-    {
-        isAiming = false;
-        isBursting = true;
-        Time.timeScale = 1.0f;
-        Time.fixedDeltaTime = 0.02f;
-        if (aimIndicator) aimIndicator.enabled = false;
-
-        // ★追加：残像エフェクト開始！
-        if (AfterImageManager.Instance != null)
-        {
-            AfterImageManager.Instance.StartEmitting();
-        }
-
-        rb.linearVelocity = aimDirection * burstForce;
+        if (AfterImageManager.Instance != null) AfterImageManager.Instance.StopEmitting();
     }
 
     void FixedUpdate()
     {
-        // ★重要：衝突が起こる前の速度を毎フレーム記録しておく
         lastVelocity = rb.linearVelocity;
-
         if (isAiming || isBursting) return;
 
         Vector2 currentVel = rb.linearVelocity;
