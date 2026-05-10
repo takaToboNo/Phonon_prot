@@ -15,6 +15,11 @@ public class EnemyHealth : MonoBehaviour
     [SerializeField] private float damageHitStop = 0.05f; // ダメージ時の停止時間
     [SerializeField] private float dieHitStop = 0.15f;     // 撃破時の停止時間
 
+    [Header("撃破時リワード")]
+    [SerializeField] private int restoreAmount = 1; // 倒した時に回復する量（インスペクターで調整）
+
+    private GameObject lastHitter;
+
     void Start()
     {
         currentHp = maxHp;
@@ -24,22 +29,13 @@ public class EnemyHealth : MonoBehaviour
     {
         if (collision.gameObject.CompareTag(playerTag))
         {
-            float impactSpeed = collision.relativeVelocity.magnitude;
+            lastHitter = collision.gameObject; // プレイヤーを保存しておく
 
+            float impactSpeed = collision.relativeVelocity.magnitude;
             if (impactSpeed >= damageSpeedThreshold)
             {
-                // ★ダメージを受けた瞬間にヒットストップ
-                if (HitStopManager.Instance != null)
-                {
-                    HitStopManager.Instance.Stop(damageHitStop);
-                }
-
+                if (HitStopManager.Instance != null) HitStopManager.Instance.Stop(damageHitStop);
                 TakeDamage(damageAmount);
-                Debug.Log($"プレイヤーが激突！ (衝撃速度: {impactSpeed:F1})");
-            }
-            else
-            {
-                Debug.Log($"速度が足りない (衝撃速度: {impactSpeed:F1})");
             }
         }
     }
@@ -56,13 +52,18 @@ public class EnemyHealth : MonoBehaviour
 
     private void Die()
     {
-        // ★トドメを刺した瞬間に長めのヒットストップ
-        if (HitStopManager.Instance != null)
+        if (lastHitter != null)
         {
-            HitStopManager.Instance.Stop(dieHitStop);
+            PlayerMovement player = lastHitter.GetComponent<PlayerMovement>();
+            if (player != null)
+            {
+                player.RestoreBurstCount(restoreAmount);
+            }
         }
 
-        Debug.Log($"{gameObject.name} が破壊されました！");
+        if (HitStopManager.Instance != null) HitStopManager.Instance.Stop(dieHitStop);
+
+        Debug.Log($"{gameObject.name} を倒して {restoreAmount} 回復！");
         Destroy(gameObject);
     }
 }

@@ -80,6 +80,18 @@ public class PlayerMovement : MonoBehaviour
         }
     }
 
+    public void RestoreBurstCount(int amount)
+    {
+        // 現在のカウントを減らす（＝残弾を増やす） 0より小さくならないように制限
+        currentBurstCount = Mathf.Max(0, currentBurstCount - amount);
+
+        // UIを更新
+        if (burstUI != null)
+        {
+            burstUI.UpdateDisplay(currentBurstCount, maxBurstCount);
+        }
+    }
+
     private void HandleInput()
     {
         if (Time.timeScale == 0f) { horizontalInput = 0f; return; }
