@@ -12,6 +12,7 @@ GameObject:
   - component: {fileID: 2162353733025491353}
   - component: {fileID: 1735203417127520763}
   - component: {fileID: 5611710534910304501}
+  - component: {fileID: 627461679374585325}
   m_Layer: 9
   m_Name: Circle
   m_TagString: Untagged
@@ -143,3 +144,19 @@ MonoBehaviour:
   m_EditorClassIdentifier: '::'
   speed: 5
   lifeTime: 3
+--- !u!114 &627461679374585325
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7159433932090268059}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6d7fa3f7160f1b54bb94d9673f302472, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::HomingBullet
+  speed: 3
+  rotationSpeed: 180
+  lifeTime: 5
+  targetTag: Player
