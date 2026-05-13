@@ -30,9 +30,26 @@ public class EnemyAttack : MonoBehaviour
         if (bulletPrefab != null && firePoint != null)
         {
             // 弾を生成（インスタンス化）
-            Instantiate(bulletPrefab, firePoint.position, firePoint.rotation);
+            GameObject bullet = Instantiate(bulletPrefab, firePoint.position, firePoint.rotation);
+            StraightBullet straightBullet = bullet.GetComponent<StraightBullet>();
+            if (straightBullet != null)
+            {
+                // ③ 同じエネミーについている「移動スクリプト(EnemyMovement)」を取得
+                EnemyMovement movement = GetComponent<EnemyMovement>();
+
+                if (movement != null)
+                {
+                    // 移動スクリプトがあれば、その移動方向（moveDirection）を弾にセットする
+                    straightBullet.SetDirection(movement.moveDirection);
+                }
+                else
+                {
+                    // もし固定砲台などで移動スクリプトがない場合は、FirePointの右方向をセット
+                    straightBullet.SetDirection(firePoint.right);
+                }
+            }
         }
-        else
+       else
         {
             Debug.LogWarning($"{gameObject.name}: 弾のプレハブ、または発射位置（FirePoint）が設定されていません。");
         }
